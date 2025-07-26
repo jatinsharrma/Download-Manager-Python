@@ -19,73 +19,80 @@ A high-performance, fragment-based download manager with concurrent downloading 
 
 🛡️ Error Handling: Graceful fallback to single-threaded download when needed
 
-📦 Installation
+### 📦 Installation
 Prerequisites
-Python 3.8 or higher
-
-pip package manager
+- Python 3.8 or higher
+- pip package manager
 
 Install Dependencies
-bash
+```bash
 pip install aiohttp aiofiles certifi
+```
 Or using requirements file:
 
-bash
+```bash
 pip install -r requirements.txt
+```
 Download the Project
-bash
+```bash
 git clone <your-repo-url>
 cd advanced-download-manager
-🚀 Quick Start
-Basic Download
-bash
+```
+## 🚀 Quick Start
+ Basic Download
+```bash
 python main.py download "https://example.com/largefile.zip"
+```
 Download with Custom Filename
-bash
+```bash
 python main.py download "https://example.com/file.zip" -f "my_download.zip"
 View Configuration
-bash
+```
+```bash
 python main.py config --show
-📖 Detailed Usage
+```
+## 📖 Detailed Usage
 Download Commands
-bash
-## Basic download
+```bash
+# Basic download
 python main.py download "https://example.com/file.zip"
 
-## Download with custom filename
+# Download with custom filename
 python main.py download "https://example.com/file.zip" -f "custom_name.zip"
 
-## Download without progress display
+# Download without progress display
 python main.py download "https://example.com/file.zip" --no-progress
 
 ## Download with specific progress style
 python main.py download "https://example.com/file.zip" --progress-style simple
+```
 Configuration Management
-bash
-## Show current configuration
+```bash
+# Show current configuration
 python main.py config --show
 
-## Set maximum concurrent fragments
+# Set maximum concurrent fragments
 python main.py config --fragments 8
 
-## Configure timeout and retry attempts
+# Configure timeout and retry attempts
 python main.py config --timeout 60 --retry-attempts 5
 
-## Set custom directories
+# Set custom directories
 python main.py config --output-dir "/path/to/downloads" --temp-dir "/path/to/temp"
 
-## SSL configuration
+# SSL configuration
 python main.py config --no-ssl-verify  # Disable SSL verification
 python main.py config --ssl-verify     # Enable SSL verification
 
-## Progress display options
+# Progress display options
 python main.py config --progress-style inline      # Inline updates (default)
 python main.py config --progress-style full_screen # Full screen display
 python main.py config --progress-style simple      # Minimal output
 
-## Save configuration permanently
+# Save configuration permanently
 python main.py config --fragments 6 --timeout 45 --save
-⚙️ Configuration
+```
+## ⚙️ Configuration
 Configuration File
 The download manager uses a download_config.json file for persistent settings:
 
