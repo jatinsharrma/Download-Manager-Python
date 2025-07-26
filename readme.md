@@ -35,7 +35,7 @@ pip install -r requirements.txt
 ```
 Download the Project
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/jatinsharrma/Download-Manager-Python.git
 cd advanced-download-manager
 ```
 ## 🚀 Quick Start
