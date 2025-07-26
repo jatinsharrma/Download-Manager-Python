@@ -1,0 +1,11 @@
+{
+  "max_concurrent_fragments": 4,
+  "chunk_size": 8192,
+  "timeout": 30,
+  "retry_attempts": 3,
+  "output_directory": "./downloads",
+  "temp_directory": "./temp",
+  "verify_ssl": true,
+  "show_progress": true,
+  "progress_style": "inline"
+}
