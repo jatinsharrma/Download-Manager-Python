@@ -8,8 +8,10 @@ from dataclasses import dataclass
 from typing import Optional, List
 import math
 import time
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 import threading
+import re
+import os
 
 from progress import ProgressTracker
 
@@ -114,99 +116,6 @@ class FragmentDownloader:
         
         return False
     
-    async def download_file(self, url: str, filename: Optional[str] = None) -> bool:
-        """Download a file using multiple fragments with progress tracking"""
-        if not filename:
-            filename = Path(urlparse(url).path).name or "downloaded_file"
-        
-        output_path = Path(self.config.output_directory) / filename
-        
-        print(f"Starting download: {filename}")
-        print(f"URL: {url}")
-        
-        # Get file size
-        file_size = await self.get_file_size(url)
-        
-        if not file_size:
-            return await self.download_single_threaded(url, output_path)
-        
-        print(f"File size: {self.format_size(file_size)}")
-        
-        # Calculate fragment ranges
-        fragment_size = math.ceil(file_size / self.config.max_concurrent_fragments)
-        fragments = []
-        
-        for i in range(self.config.max_concurrent_fragments):
-            start = i * fragment_size
-            end = min(start + fragment_size - 1, file_size - 1)
-            
-            if start <= end:
-                fragment_path = Path(self.config.temp_directory) / f"{filename}.part{i}"
-                fragments.append((start, end, fragment_path, i))
-        
-        print(f"Downloading in {len(fragments)} fragments...")
-        print(f"Progress style: {self.config.progress_style}")
-        print()  # Empty line before progress
-        
-        # Initialize progress tracker
-        if self.config.show_progress:
-            self.progress_tracker = ProgressTracker(len(fragments), self.config.progress_style)
-            self.progress_tracker.display_active = True
-            
-            # Start progress display in background thread
-            progress_thread = threading.Thread(target=self.progress_tracker.display_progress)
-            progress_thread.daemon = True
-            progress_thread.start()
-        
-        # Download fragments concurrently
-        start_time = time.time()
-        
-        connector = aiohttp.TCPConnector(ssl=self.ssl_context)
-        async with aiohttp.ClientSession(
-            connector=connector,
-            timeout=aiohttp.ClientTimeout(total=self.config.timeout)
-        ) as session:
-            tasks = [
-                self.download_fragment(session, url, start, end, str(fragment_path), fragment_id)
-                for start, end, fragment_path, fragment_id in fragments
-            ]
-            
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Stop progress display
-        if self.progress_tracker:
-            self.progress_tracker.display_active = False
-            time.sleep(0.6)  # Give time for display thread to stop
-            
-            # Clear progress lines if using inline mode
-            if self.config.progress_style == "inline" and self.progress_tracker.supports_ansi:
-                print(f"\033[{self.progress_tracker.last_line_count}A", end="")
-                for _ in range(self.progress_tracker.last_line_count):
-                    print("\033[K")  # Clear each line
-            elif self.config.progress_style == "full_screen" and self.progress_tracker.supports_ansi:
-                print("\033[2J\033[H", end="")  # Clear screen
-        
-        # Check if all fragments downloaded successfully
-        if not all(isinstance(result, bool) and result for result in results):
-            print("✗ Some fragments failed to download")
-            self.cleanup_fragments(fragments)
-            return False
-        
-        # Join fragments
-        print("Joining fragments...")
-        success = await self.join_fragments(fragments, output_path)
-        
-        if success:
-            download_time = time.time() - start_time
-            speed = file_size / download_time / (1024 * 1024)  # MB/s
-            print(f"✓ Download completed in {download_time:.2f}s ({speed:.2f} MB/s)")
-            print(f"✓ File saved to: {output_path}")
-        
-        # Cleanup temporary fragments
-        self.cleanup_fragments(fragments)
-        
-        return success
-    
     async def download_single_threaded(self, url: str, output_path: Path) -> bool:
         """Fallback single-threaded download with progress"""
         print("Using single-threaded download...")
@@ -271,6 +180,250 @@ class FragmentDownloader:
                     fragment_path.unlink()
             except Exception as e:
                 print(f"Warning: Could not delete fragment {fragment_path}: {e}")
+
+    async def get_filename_from_headers(self, url: str) -> Optional[str]:
+        """
+        Try to get filename from Content-Disposition header ONLY
+        Don't return extensions from Content-Type
+        """
+        connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=self.config.timeout)
+        ) as session:
+            try:
+                async with session.head(url) as response:
+                    # ONLY check Content-Disposition header for actual filename
+                    content_disposition = response.headers.get('Content-Disposition')
+                    if content_disposition:
+                        # Parse Content-Disposition: attachment; filename="example.zip"
+                        if 'filename=' in content_disposition:
+                            filename_match = re.search(r'filename[*]?=([^;]+)', content_disposition)
+                            if filename_match:
+                                filename = filename_match.group(1).strip('"\'')
+                                return unquote(filename)
+                    
+                    # DON'T return extensions from Content-Type anymore
+                    return None
+                            
+            except Exception:
+                pass
+        
+        return None
+
+    def extract_filename_from_url(self, url: str) -> str:
+        """
+        Extract a clean filename from URL, handling query parameters and edge cases
+        """
+        try:
+            # Parse the URL to separate components
+            parsed_url = urlparse(url)
+            
+            # Get the path component (without query parameters)
+            path = parsed_url.path
+            
+            # URL decode the path to handle encoded characters
+            path = unquote(path)
+            
+            # Extract filename from path
+            filename = Path(path).name
+            
+            # Clean the filename of any remaining query parameter artifacts
+            if '?' in filename:
+                filename = filename.split('?')[0]
+            
+            # Remove invalid characters for filename
+            filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+            
+            # Handle edge cases
+            if not filename or filename == '.' or filename == '..':
+                # Try to get a meaningful name from the path
+                path_parts = [part for part in path.split('/') if part and part not in ('.', '..')]
+                if path_parts:
+                    filename = path_parts[-1]
+                    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+                else:
+                    filename = "downloaded_file"
+            
+            # If no extension, try to guess from URL or add default
+            if '.' not in filename:
+                # Try to get extension from the URL path
+                for part in reversed(path.split('/')):
+                    if '.' in part and not part.startswith('.'):
+                        # Found a part with extension, use it
+                        ext = '.' + part.split('.')[-1]
+                        filename += ext
+                        break
+                else:
+                    # No extension found, add default
+                    filename += ".bin"
+            
+            # Limit filename length (most filesystems support 255 chars)
+            if len(filename) > 200:
+                name_part, ext_part = os.path.splitext(filename)
+                name_part = name_part[:200-len(ext_part)]
+                filename = name_part + ext_part
+            
+            return filename
+            
+        except Exception as e:
+            print(f"Warning: Could not extract filename from URL: {e}")
+            return "downloaded_file.bin"
+
+    def get_extension_from_content_type(self, content_type: str) -> str:
+        """
+        Get file extension from Content-Type header
+        """
+        type_to_ext = {
+            'application/zip': '.zip',
+            'application/pdf': '.pdf',
+            'image/jpeg': '.jpg',
+            'image/png': '.png',
+            'video/mp4': '.mp4',
+            'application/json': '.json',
+            'text/plain': '.txt',
+            'application/octet-stream': '.bin',
+            'video/x-msvideo': '.avi',
+            'image/gif': '.gif',
+        }
+        return type_to_ext.get(content_type.split(';')[0], '.bin')
+
+    async def get_content_type_extension(self, url: str) -> Optional[str]:
+        """
+        Get extension from Content-Type header (separate method)
+        """
+        connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=self.config.timeout)
+        ) as session:
+            try:
+                async with session.head(url) as response:
+                    content_type = response.headers.get('Content-Type')
+                    if content_type:
+                        return self.get_extension_from_content_type(content_type)
+            except Exception:
+                pass
+        return None
+
+    async def download_file(self, url: str, filename: Optional[str] = None) -> bool:
+        """Download a file using multiple fragments with proper filename handling"""
+        
+        if not filename:
+            # Step 1: Try to get filename from Content-Disposition header
+            header_filename = await self.get_filename_from_headers(url)
+            if header_filename:
+                filename = header_filename
+                print(f"Using filename from server header: {filename}")
+            else:
+                # Step 2: Extract from URL
+                filename = self.extract_filename_from_url(url)
+                print(f"Using filename from URL: {filename}")
+                
+                # Step 3: If URL filename has no extension, try to get it from Content-Type
+                if '.' not in filename or filename.endswith('.bin'):
+                    content_extension = await self.get_content_type_extension(url)
+                    if content_extension and content_extension != '.bin':
+                        # Replace .bin with proper extension, or add extension if none
+                        if filename.endswith('.bin'):
+                            filename = filename[:-4] + content_extension
+                        else:
+                            filename += content_extension
+                        print(f"Added extension from Content-Type: {filename}")
+        
+        # Final validation
+        if not filename or filename in ['.zip', '.txt', '.pdf']:  # Just extensions
+            filename = f"downloaded_file{filename if filename.startswith('.') else '.bin'}"
+            print(f"Fixed invalid filename to: {filename}")
+        
+        output_path = Path(self.config.output_directory) / filename
+        
+        print(f"Starting download: {filename}")
+        print(f"URL: {url}")
+        print(f"Output path: {output_path}")
+        
+        # Rest of the method remains the same...
+        file_size = await self.get_file_size(url)
+        
+        if not file_size:
+            return await self.download_single_threaded(url, output_path)
+        
+        print(f"File size: {self.format_size(file_size)}")
+        
+        # Calculate fragment ranges
+        fragment_size = math.ceil(file_size / self.config.max_concurrent_fragments)
+        fragments = []
+        
+        for i in range(self.config.max_concurrent_fragments):
+            start = i * fragment_size
+            end = min(start + fragment_size - 1, file_size - 1)
+            
+            if start <= end:
+                fragment_path = Path(self.config.temp_directory) / f"{filename}.part{i}"
+                fragments.append((start, end, fragment_path, i))
+        
+        print(f"Downloading in {len(fragments)} fragments...")
+        if self.config.show_progress:
+            print(f"Progress style: {self.config.progress_style}")
+        print()
+        
+        # Initialize progress tracker
+        if self.config.show_progress:
+            self.progress_tracker = ProgressTracker(len(fragments), self.config.progress_style)
+            self.progress_tracker.display_active = True
+            
+            progress_thread = threading.Thread(target=self.progress_tracker.display_progress)
+            progress_thread.daemon = True
+            progress_thread.start()
+        
+        # Download fragments concurrently
+        start_time = time.time()
+        
+        connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=self.config.timeout)
+        ) as session:
+            tasks = [
+                self.download_fragment(session, url, start, end, str(fragment_path), fragment_id)
+                for start, end, fragment_path, fragment_id in fragments
+            ]
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Stop progress display
+        if self.progress_tracker:
+            self.progress_tracker.display_active = False
+            time.sleep(0.6)
+            
+            if self.config.progress_style == "inline" and self.progress_tracker.supports_ansi:
+                print(f"\033[{self.progress_tracker.last_line_count}A", end="")
+                for _ in range(self.progress_tracker.last_line_count):
+                    print("\033[K")
+            elif self.config.progress_style == "full_screen" and self.progress_tracker.supports_ansi:
+                print("\033[2J\033[H", end="")
+        
+        # Check if all fragments downloaded successfully
+        if not all(isinstance(result, bool) and result for result in results):
+            print("✗ Some fragments failed to download")
+            self.cleanup_fragments(fragments)
+            return False
+        
+        # Join fragments
+        print("Joining fragments...")
+        success = await self.join_fragments(fragments, output_path)
+        
+        if success:
+            download_time = time.time() - start_time
+            speed = file_size / download_time / (1024 * 1024)
+            print(f"✓ Download completed in {download_time:.2f}s ({speed:.2f} MB/s)")
+            print(f"✓ File saved to: {output_path}")
+        
+        # Cleanup temporary fragments
+        self.cleanup_fragments(fragments)
+        
+        return success
+
     
     @staticmethod
     def format_size(size_bytes: int) -> str:
