@@ -137,7 +137,7 @@ python main.py config --fragments 8 --chunk-size 32768 --timeout 30 --save
 python main.py config --fragments 2 --chunk-size 4096 --timeout 120 --retry-attempts 10 --save
 ```
 
-### 🏗️ Project Structure
+## 🏗️ Project Structure
 ```text
 advanced-download-manager/
 ├── main.py              # Entry point and CLI argument parsing
@@ -169,7 +169,7 @@ certifi>=2022.12.7
 
 - Network: Any internet connection
 
-### 📊 Progress Display Styles
+## 📊 Progress Display Styles
 #### 1. Inline Progress (Default)
 Updates the same lines in place, perfect for most terminals:
 
@@ -210,7 +210,7 @@ Progress:  50.0% | Speed: 48.7 MB/s | Fragments: 2/4 completed
 Progress:  75.0% | Speed: 52.1 MB/s | Fragments: 3/4 completed
 Progress: 100.0% | Speed: 49.8 MB/s | Fragments: 4/4 completed
 ```
-### 🛠️ Troubleshooting
+## 🛠️ Troubleshooting
 #### Common Issues
 #### SSL Certificate Errors
 ```bash
@@ -258,7 +258,7 @@ To get detailed debug information:
 print(f"DEBUG: Status: {response.status}")
 print(f"DEBUG: Headers: {dict(response.headers)}")
 ```
-### 🤝 Contributing
+## 🤝 Contributing
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
 Development Setup
@@ -270,15 +270,15 @@ Development Setup
 6. Push to the branch (git push origin feature/amazing-feature)
 7. Open a Pull Request
 
-### 📝 License
+## 📝 License
 This project is licensed under the MIT License.
 
-### 🙏 Acknowledgments
+## 🙏 Acknowledgments
 - Built with aiohttp for async HTTP requests
 - Uses aiofiles for async file operations
 - SSL certificate handling via certifi
 
-### 📈 Performance Benchmarks
+## 📈 Performance Benchmarks
 Typical performance improvements over single-threaded downloads:
 
 | Connection Speed | Fragments | Typical Speedup      |
